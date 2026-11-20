@@ -1,51 +1,200 @@
-# QueueEase — Smart Queue & Appointment Manager
+QueueEase ⏳
 
-QueueEase is a general-purpose, real-time digital queue and appointment management platform. Service providers—such as clinics, therapists, HR desks, banks, salons, and government offices—can spin up a live queue in seconds, while customers join remotely, track live wait-time estimates, and receive multi-channel alerts as their turn approaches.
+Smart Queue & Appointment Manager A general-purpose digital queuing platform for clinics, therapists, HR desks, banks, government offices, salons, and customer service counters.
 
-Zero external accounts, API keys, or cloud databases are required. Everything runs locally out of the box.
+1. Overview & Problem Solved
 
----
+People waste hours physically waiting in cramped waiting rooms at clinics, therapist offices, HR desks, banks, and public offices. QueueEase turns physical lines into smart, dynamic digital queues:
 
-## Key Features
+Remote Join: Customers scan a QR code or enter a 6-character code to take a digital token from their phone.
+Dynamic Queue Reordering: Uses arrival time, custom priority tiers, and priority aging to prevent starvation of low-priority customers while ensuring Emergency (Rank 1) customers always jump to the front.
+Accurate Live Wait Times: Rolling average calculated from real completed tokens today, factoring in busy vs. free counters and parallel capacity.
+Omnichannel Turn Alerts: WebAudio synthetic chimes (no audio files needed), navigator.vibrate, system browser notifications, in-app pulsating banners, and blinking page titles.
+Public TV Display Board: Fullscreen high-contrast live board with active counter bay status and next waiting list for waiting room monitors.
+Zero Config & Local: Runs completely locally using SQLite (better-sqlite3), Node.js, Express, Socket.IO, and React + Vite.
+2. Tech Stack
+Frontend: React 18, React Router v6, plain mobile-first responsive CSS, Vite.
+Backend: Node.js, Express, Socket.IO for realtime WebSocket events.
+Database: SQLite via better-sqlite3 (auto-creates tables and WAL journal mode on launch).
+QR Codes: qrcode.react (SVG QR generation).
+Audio & Haptics: Pure WebAudio oscillator synthesis (pleasant dual-tone chime) & navigator.vibrate.
+Testing: Built-in node:test and node:assert/strict.
+3. Quick Start & Exact Run Commands
+Prerequisites
+Node.js (v18+ or v20+ recommended)
+npm
+Installation
 
-- **Dynamic Priority & Aging Engine:** Automatically sorts `WAITING` tokens by priority rank, arrival/scheduled time, and a configurable aging mechanism that prevents low-priority customers from waiting indefinitely—while ensuring Emergency (Rank 1) tokens are never overtaken.
-- **Live Wait-Time Estimation:** Calculates rolling average service times from the last 10 completed tokens (filtering outliers >3x default), factoring in active counters and busy slots to display a ±25% time range and expected clock time.
-- **Appointments & Walk-Ins:** Supports 15-minute appointment slots up to 7 days ahead. On-time check-ins retain their scheduled slot priority; late arrivals (>15 min) fall back to check-in time.
-- **Real-Time Updates with Fallback:** Powered by Socket.IO rooms (`facility:{id}` and `token:{id}`) with an automatic 10-second polling fallback and live connection status indicator.
-- **Multi-Channel Notifications:** In-app banners, toasts, Web Audio API synthesized beeps (no audio files), `navigator.vibrate`, Browser Notification API, and blinking page titles (`(!) Your turn`).
-- **Automated No-Show Handling:** Background job checks grace-period expiry every 15 seconds after a second recall, auto-marking `NO_SHOW` and allowing a one-time daily rejoin.
-- **Three Dedicated Views:** Mobile-first Customer flow, PIN-protected Staff Dashboard (with a 5-customer simulator), and a fullscreen TV-style Public Display Board.
+From the project root:
 
----
+bash
+# Install root, server, and client dependencies
+npm install
+Seed Demo Facilities
 
-## Tech Stack
+Populate two realistic demo facilities (DEMO01 City Clinic and DEMO02 Mind Wellness Therapy) with 8 tokens across all priority levels:
 
-| Layer | Technology |
-| :--- | :--- |
-| **Frontend** | React, Vite, React Router, Plain CSS (mobile-first), `qrcode.react` |
-| **Backend** | Node.js, Express |
-| **Database** | SQLite via `better-sqlite3` (auto-initializes schema on startup) |
-| **Realtime** | Socket.IO (+ 10-second client polling fallback) |
-| **Testing** | Node.js built-in test runner (`node:test`) |
-| **Dev Tooling** | Monorepo (`/client` & `/server`) orchestrated with `concurrently` |
+bash
+npm run seed
 
----
+Default Staff PIN: 1234 for all demo facilities.
 
-## Project Structure
+Run Unit Tests
 
-```text
-queue-ease/
-├── package.json              # Root scripts (dev, seed, test)
-├── server/
-│   ├── index.js              # Express app, Socket.IO setup, background no-show job
-│   ├── db.js                 # SQLite connection & auto-schema creation
-│   ├── queueEngine.js        # Pure, unit-tested priority & aging ordering engine
-│   ├── waitEstimate.js       # Pure, unit-tested wait-time calculation function
-│   ├── notify.js             # Socket.IO notification dispatcher + SMS/WhatsApp stub
-│   ├── seed.js               # Demo data generator
-│   └── tests/                # node:test unit tests
-└── client/
-    ├── vite.config.js        # Proxy config for /api and /socket.io -> :4000
-    └── src/
-        ├── pages/            # Home, Create, Join, TokenStatus, StaffDashboard, DisplayBoard
-        └── components/       # Banners, toasts, QR display, priority chips
+Execute the unit tests for Queue Ordering, Priority Aging, and Wait-Time Estimation:
+
+bash
+npm test
+Start Development Server
+
+Starts both the backend (port 4000) and the Vite frontend (port 5173) concurrently:
+
+bash
+npm run dev
+
+Open http://localhost:5173
+ in your browser.
+
+4. Key Rules & Business Logic
+A. Dynamic Queue Ordering & Priority Aging
+Effective Rank Calculation:
+effective_rank
+=
+priority.rank
+−
+⌊
+minutes_waited
+aging_minutes
+⌋
+effective_rank=priority.rank−⌊
+aging_minutes
+minutes_waited
+	​
+
+⌋
+Emergency (Rank 1) is inviolable: Aging discounts never allow non-emergency tokens to drop below Rank 2. Emergency always stays #1.
+Anti-Starvation: A Regular (Rank 4) customer waiting for a long time gradually advances to Rank 3, then Rank 2, moving ahead of newly arrived regular walk-ins.
+When aging_minutes = 0, aging is disabled.
+Sort Hierarchy: effective_rank ASC 
+→
+→ effective_time ASC 
+→
+→ seq ASC.
+Appointments:
+Pre-booked appointments hold BOOKED status until checked in.
+Self check-in is enabled 15 minutes before the scheduled time.
+On-time/early check-in preserves effective_time = scheduled_time, prioritizing them over walk-ins who arrived later.
+Late check-in (>15 min late) assigns effective_time = checkin_time.
+B. Wait-Time Estimation
+Average Service Duration: Rolling mean of the last 10 COMPLETED tokens today (
+completed_at
+−
+started_at
+completed_at−started_at). Durations 
+>
+3
+×
+>3× default are filtered out as outliers. If fewer than 3 samples exist today, it uses facility.default_service_minutes.
+Capacity & Wait Batches:
+𝑎
+=
+waiting tokens ahead
+a=waiting tokens ahead
+busy
+=
+tokens in CALLED or SERVING
+busy=tokens in CALLED or SERVING
+free
+=
+max
+⁡
+(
+0
+,
+active_counters
+−
+busy
+)
+free=max(0,active_counters−busy)
+If 
+𝑎
+<
+free
+a<free: Wait is estimated at 0–2 min (counter available immediately).
+Otherwise:
+wait
+=
+⌈
+𝑎
+−
+free
++
+1
+active_counters
+⌉
+×
+avg_service_minutes
+wait=⌈
+active_counters
+a−free+1
+	​
+
+⌉×avg_service_minutes
+Displays a 
+±
+25
+%
+±25% range (e.g. "about 12–18 min") alongside expected clock time. Shows "Queue paused" when paused.
+C. Automated No-Show & 1-per-Day Rejoin
+Staff calls a customer to a counter. They can recall up to 2 times (3 total calls).
+If call_count >= 2 and now - called_at > facility.no_show_grace_minutes: The background server job (running every 15s) automatically transitions the token to NO_SHOW and sends a notification.
+A NO_SHOW customer sees a "Rejoin queue" button, permitted once per day. This generates a fresh token with effective_time = now preserving their original priority category.
+D. Duplicate Phone Protection
+Multiple active tokens (BOOKED, WAITING, CALLED, SERVING) for the same phone number at the same facility are strictly rejected with HTTP 409.
+5. Application Screens
+Screen	Route	Description
+Home	/	Directory of active facilities, 6-character code input, demo facility shortcuts, and "Create My Queue" CTA.
+Create Facility	/create	Setup form for name, facility type, active counters, service minutes, 4-digit PIN, and priority categories. Displays generated code & QR code on success.
+Join Queue	/join/:code	Live queue length and wait estimate preview before joining, walk-in vs. appointment toggle (15-min slots for next 7 days), priority selection with verification notices, notification threshold selector.
+Token Status	/token/:id	Live digital ticket with display number (e.g. E-001), queue position, dynamic wait range, "Now Serving" strip across counters, check-in for appointments, rejoin button for no-shows, and urgent banner when called.
+Staff Dashboard	/staff/:code	Protected by 4-digit PIN. Realtime stats, counter bay cards with Call/Recall/Start/Complete/No-Show controls, ordered waiting list with 1-tap priority editor, pause/resume queue, simulate 5 customers, and day reset.
+TV Display Board	/display/:code	Fullscreen-friendly dark-mode monitor display showing massive "Now Serving" numbers by counter with pulse animations, next 5 waiting list, clock, and audio chimes.
+6. Verification & Test Summary
+
+The following test suites and end-to-end user journeys were executed and verified:
+
+Unit Tests (npm test):
+Inviolability of Emergency Rank 1 under extreme wait times (1000+ mins).
+Stepwise priority aging discounts and floor at Rank 2.
+Disabling aging when aging_minutes = 0.
+Appointment check-in early/on-time vs. >15 min late time assignments.
+Self check-in 15-minute eligibility window.
+Dynamic sorting algorithm: verified that emergency customers jump to index 0 and long-waiting regular customers age up.
+Wait-time estimation logic: outlier duration rejection, zero-wait free counter logic, and batch calculation with 
+±
+25
+%
+±25% range.
+Facility Creation Flow:
+Created facility with custom counters and PIN. Verified 6-char unique code generation and QR code rendering.
+Customer Ingestion & Priority Ordering:
+Ingested 5 customers in sequence: Regular walk-ins, Senior citizen, Appointment, and an Emergency customer who arrived last.
+Verified that Emergency immediately positioned at #1 in line on both Staff Dashboard and Public TV Board.
+Counter Service Lifecycle:
+Called customer to Counter 1 
+→
+→ Status became CALLED with audio chime and in-app banner.
+Transitioned CALLED 
+→
+→ SERVING 
+→
+→ COMPLETED. Verified rolling average service time recalculated automatically.
+No-Show & Rejoin Lifecycle:
+Called customer to Counter 2, recalled once, verified recall count.
+Transitioned to NO_SHOW. Verified customer status page presented "Rejoin queue" button.
+Triggered rejoin: verified old token marked rejoined = 1 and new active token created with current arrival time.
+Queue Pause & Resume:
+Paused queue with reason: verified customer token status showed "Queue paused" with reason. Resumed queue and verified live wait estimation restored.
+Concurrency & Validation:
+Concurrency protection on call-next using SQLite transactions.
+Phone duplicate check blocked second active ticket creation.
